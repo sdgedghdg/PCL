@@ -26,6 +26,14 @@ jobs:
         fetch-depth: 0
         submodules: true
 
+    - name: Clone MeloongCore submodule
+      shell: bash
+      run: |
+        if [ ! -f "MeloongCore/Shared/MeloongCore.csproj" ]; then
+          rm -rf MeloongCore
+          git clone --depth 1 https://github.com/Meloong-Git/MeloongCore.git MeloongCore
+        fi
+
     - name: Set Describe
       shell: bash
       run: |
