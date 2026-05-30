@@ -39,7 +39,7 @@
     Private Sub SaveTracking()
         Try
             Dim data As New List(Of JObject)
-            For Each t In McTrackedInstances
+            For Each t In McTrackedInstances.ToList()
                 data.Add(New JObject From {
                     New JProperty("id", t.Id),
                     New JProperty("pid", t.Process.Id),
@@ -47,6 +47,7 @@
                     New JProperty("processName", t.Process.ProcessName)
                 })
             Next
+            Logger.Info($"保存进程追踪：{data.Count} 个进程 → {TrackingFilePath}")
             File.WriteAllText(TrackingFilePath, New JObject(New JProperty("instances", New JArray(data))).ToString())
         Catch ex As Exception
             Logger.Error(ex, "保存进程追踪记录失败")
@@ -59,11 +60,17 @@
     End Sub
     Public Sub SaveTrackingAfterLaunch(proc As Process, instanceName As String)
         If Settings.Get(Of Integer)("LaunchProcessTracking") = 0 Then Return
-        Dim id = Guid.NewGuid().ToString()
-        Dim tracked As New TrackedInstance(id, proc, proc.StartTime)
-        McTrackedInstances.Add(tracked)
-        SaveTracking()
-        EnsureTrackedMonitorRunning()
+        Try
+            Dim id = Guid.NewGuid().ToString()
+            Dim startTime = proc.StartTime
+            Dim tracked As New TrackedInstance(id, proc, startTime)
+            McTrackedInstances.Add(tracked)
+            Logger.Info($"进程追踪：保存进程 PID={proc.Id}, startTime={startTime:o}")
+            SaveTracking()
+            EnsureTrackedMonitorRunning()
+        Catch ex As Exception
+            Logger.Error(ex, "保存进程追踪信息失败")
+        End Try
     End Sub
     Public Sub KillAllTracked()
         For Each t In McTrackedInstances.ToList()
@@ -74,34 +81,62 @@
     End Sub
     Public Sub LoadTrackedProcesses()
         Try
-            If Settings.Get(Of Integer)("LaunchProcessTracking") = 0 Then Return
-            If Not File.Exists(TrackingFilePath) Then Return
+            If Settings.Get(Of Integer)("LaunchProcessTracking") = 0 Then
+                Logger.Info("进程追踪：跳过加载，设置值为 0")
+                Return
+            End If
+            If Not File.Exists(TrackingFilePath) Then
+                Logger.Info($"进程追踪：跳过加载，文件不存在：{TrackingFilePath}")
+                Return
+            End If
+            Logger.Info($"进程追踪：开始加载 {TrackingFilePath}")
             Dim json = JObject.Parse(File.ReadAllText(TrackingFilePath))
             Dim instances = json("instances")
             If instances Is Nothing Then Return
+            Dim loadedCount As Integer = 0
+            Dim skipCount As Integer = 0
             For Each item In instances
                 Dim pidToken = item("pid")
                 Dim startTimeToken = item("startTime")
                 Dim idToken = item("id")
-                Dim pid As Integer? = If(pidToken IsNot Nothing, pidToken.Value(Of Integer)(), Nothing)
-                Dim startTimeStr As String = If(startTimeToken IsNot Nothing, startTimeToken.Value(Of String)(), Nothing)
-                If pid Is Nothing OrElse startTimeStr Is Nothing Then Continue For
-                Dim startTime = Date.Parse(startTimeStr)
+                If pidToken Is Nothing OrElse startTimeToken Is Nothing Then
+                    skipCount += 1 : Logger.Info("进程追踪：跳过条目，缺少 pid 或 startTime")
+                    Continue For
+                End If
+                Dim pid As Integer = pidToken.Value(Of Integer)()
+                Dim startTimeStr As String = startTimeToken.Value(Of String)()
+                Dim startTime As Date
+                If Not Date.TryParse(startTimeStr, startTime) Then
+                    skipCount += 1 : Logger.Info($"进程追踪：跳过条目，解析 startTime 失败：{startTimeStr}")
+                    Continue For
+                End If
                 Dim proc As Process = Nothing
                 Try
-                    proc = Process.GetProcessById(pid.Value)
-                    If proc.HasExited OrElse proc.StartTime <> startTime Then
+                    proc = Process.GetProcessById(pid)
+                    Logger.Info($"进程追踪：找到进程 PID={pid}, Name={proc.ProcessName}, StartTime={proc.StartTime:o}, HasExited={proc.HasExited}")
+                    If proc.HasExited Then
+                        Logger.Info($"进程追踪：PID={pid} 进程已退出，跳过")
+                        proc = Nothing
+                    ElseIf proc.StartTime <> startTime Then
+                        Logger.Info($"进程追踪：PID={pid} startTime 不匹配 (saved={startTime:o}, actual={proc.StartTime:o})，跳过")
                         proc = Nothing
                     End If
-                Catch
+                Catch ex As Exception
+                    Logger.Info($"进程追踪：获取 PID={pid} 失败：{ex.Message}")
                 End Try
-                If proc Is Nothing Then Continue For
+                If proc Is Nothing Then
+                    skipCount += 1 : Continue For
+                End If
                 Dim id As String = If(idToken IsNot Nothing, idToken.Value(Of String)(), Guid.NewGuid().ToString())
                 McTrackedInstances.Add(New TrackedInstance(id, proc, startTime))
+                loadedCount += 1
             Next
+            Logger.Info($"进程追踪：加载完成，成功={loadedCount}，跳过={skipCount}")
             If McTrackedInstances.Any() Then
                 FrmMain.BtnExtraShutdown.ShowRefresh()
                 EnsureTrackedMonitorRunning()
+            Else
+                Try : File.Delete(TrackingFilePath) : Catch : End Try
             End If
         Catch ex As Exception
             Logger.Error(ex, "加载进程追踪记录失败")
