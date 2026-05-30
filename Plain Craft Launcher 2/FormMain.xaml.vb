@@ -1605,10 +1605,10 @@ Public Class FormMain
             Logger.Error(ex, "中断加载器失败")
         End Try
         Try
+            ModWatcher.KillAllTracked()
             For Each Watcher In McWatcherList
                 Watcher.Kill()
             Next
-            ModWatcher.KillAllTracked()
             Hint("已关闭运行中的 Minecraft！", HintType.Green)
         Catch ex As Exception
             Logger.Error(ex, "强制关闭所有 Minecraft 失败")

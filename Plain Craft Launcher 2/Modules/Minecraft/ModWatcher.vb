@@ -78,6 +78,7 @@
             McTrackedInstances.Remove(t)
         Next
         SaveTracking()
+        FrmMain.BtnExtraShutdown.ShowRefresh()
     End Sub
     Public Sub LoadTrackedProcesses()
         Try
