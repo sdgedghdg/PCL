@@ -80,20 +80,23 @@
             Dim instances = json("instances")
             If instances Is Nothing Then Return
             For Each item In instances
-                Dim pid = item("pid")?.Value(Of Integer)()
-                Dim startTimeStr = item("startTime")?.Value(Of String)()
+                Dim pidToken = item("pid")
+                Dim startTimeToken = item("startTime")
+                Dim idToken = item("id")
+                Dim pid As Integer? = If(pidToken IsNot Nothing, pidToken.Value(Of Integer)(), Nothing)
+                Dim startTimeStr As String = If(startTimeToken IsNot Nothing, startTimeToken.Value(Of String)(), Nothing)
                 If pid Is Nothing OrElse startTimeStr Is Nothing Then Continue For
                 Dim startTime = Date.Parse(startTimeStr)
                 Dim proc As Process = Nothing
                 Try
-                    proc = Process.GetProcessById(pid)
+                    proc = Process.GetProcessById(pid.Value)
                     If proc.HasExited OrElse proc.StartTime <> startTime Then
                         proc = Nothing
                     End If
                 Catch
                 End Try
                 If proc Is Nothing Then Continue For
-                Dim id = item("id")?.Value(Of String)() ?? Guid.NewGuid().ToString()
+                Dim id As String = If(idToken IsNot Nothing, idToken.Value(Of String)(), Guid.NewGuid().ToString())
                 McTrackedInstances.Add(New TrackedInstance(id, proc, startTime))
             Next
             If McTrackedInstances.Any() Then
